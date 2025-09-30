@@ -20,19 +20,28 @@ export function SecretMy() {
   const { instance } = useZamaInstance();
   const [finding, setFinding] = useState(false);
   const [records, setRecords] = useState<FoundRecord[]>([]);
+  const [status, setStatus] = useState<string>('');
   const client = useMemo(() => createPublicClient({ chain: sepolia, transport: http() }), []);
 
   const findMy = async () => {
     if (!address) return;
     setFinding(true);
+    setStatus('');
     try {
       // Read per-user records directly from contract (no events, no global scan)
-      const count = await client.readContract({
-        address: CONTRACT_ADDRESS as `0x${string}`,
-        abi: CONTRACT_ABI as any,
-        functionName: 'getUserRecordCount',
-        args: [address as `0x${string}`],
-      }) as bigint;
+      let count: bigint;
+      try {
+        count = await client.readContract({
+          address: CONTRACT_ADDRESS as `0x${string}`,
+          abi: CONTRACT_ABI as any,
+          functionName: 'getUserRecordCount',
+          args: [address as `0x${string}`],
+        }) as bigint;
+      } catch (e: any) {
+        setStatus('This contract address does not support per-user index. Please deploy the latest SecretBank and update CONTRACT_ADDRESS.');
+        setRecords([]);
+        return;
+      }
 
       const metas: FoundRecord[] = [];
       for (let i = 0n; i < count; i++) {
@@ -118,6 +127,7 @@ export function SecretMy() {
       <div style={{ display: 'flex', gap: 12 }}>
         <button disabled={!address || finding} onClick={findMy} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', background: '#eef' }}>{finding ? 'Searching...' : 'Find My Records'}</button>
       </div>
+      {status && <div style={{ color: '#b00', fontSize: 13 }}>{status}</div>}
       {records.length > 0 && (
         <div style={{ display: 'grid', gap: 12 }}>
           {records.map(r => (
