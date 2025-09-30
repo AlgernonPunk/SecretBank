@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { SecretSubmit } from './SecretSubmit';
 import { SecretView } from './SecretView';
+import { SecretPublic } from './SecretPublic';
 
 export function SecretBankApp() {
-  const [activeTab, setActiveTab] = useState<'submit' | 'view'>('submit');
+  const [activeTab, setActiveTab] = useState<'submit' | 'view' | 'public'>('submit');
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px' }}>
@@ -16,9 +17,12 @@ export function SecretBankApp() {
       <nav style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
         <button onClick={() => setActiveTab('submit')} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', background: activeTab === 'submit' ? '#eef' : 'white' }}>Submit</button>
         <button onClick={() => setActiveTab('view')} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', background: activeTab === 'view' ? '#eef' : 'white' }}>View</button>
+        <button onClick={() => setActiveTab('public')} style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', background: activeTab === 'public' ? '#eef' : 'white' }}>Public</button>
       </nav>
 
-      {activeTab === 'submit' ? <SecretSubmit /> : <SecretView />}
+      {activeTab === 'submit' && <SecretSubmit />}
+      {activeTab === 'view' && <SecretView />}
+      {activeTab === 'public' && <SecretPublic />}
 
       <section style={{ marginTop: 32, paddingTop: 16, borderTop: '1px solid #eee' }}>
         <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>How To Use</h2>
@@ -32,11 +36,7 @@ export function SecretBankApp() {
           <li>Click “Decrypt (user)” to re-encrypt through Zama Relayer and reveal the plaintext locally.</li>
         </ol>
         <div style={{ marginTop: 12, fontSize: 13, color: '#555' }}>
-          Owner only (after Public At): use on-chain actions to reveal data for everyone.
-          <ul style={{ paddingLeft: 18, margin: '6px 0 0' }}>
-            <li>Make-public path: call <code>makePublic(id)</code> so anyone can use public decryption.</li>
-            <li>Oracle path: call <code>requestDecryption(id)</code>; the oracle callback stores plaintext on-chain.</li>
-          </ul>
+          Public reveal (after Public At): anyone can go to “Public” and call <code>makePublic(id)</code> to allow public decryption.
         </div>
       </section>
     </div>

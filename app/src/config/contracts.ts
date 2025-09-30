@@ -1,5 +1,5 @@
 // SecretBank contract on Sepolia (update after deploy)
-export const CONTRACT_ADDRESS = '0x4f68A890FF39C967BC1536fEF9c02b1511C535c6';
+export const CONTRACT_ADDRESS = '0x3c594289Fd61684A30302b94DfB39DF70e324017';
 
 // ABI copied from artifacts/contracts/SecretBank.sol/SecretBank.json
 export const CONTRACT_ABI = [
