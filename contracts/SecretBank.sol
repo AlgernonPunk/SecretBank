@@ -81,7 +81,7 @@ contract SecretBank is SepoliaConfig {
     }
 
     /// @notice Mark ciphertexts as publicly decryptable after the time threshold.
-    function makePublic(uint256 id) external onlyOwner {
+    function makePublic(uint256 id) external {
         Record storage r = records[id];
         require(r.encBytes.length > 0, "No record");
         require(block.timestamp >= r.publicAt, "Too early");
@@ -98,7 +98,7 @@ contract SecretBank is SepoliaConfig {
 
     /// @notice Request on-chain oracle decryption after the time threshold.
     ///         The decrypted cleartext will be saved in `cleartext`.
-    function requestDecryption(uint256 id) external onlyOwner {
+    function requestDecryption(uint256 id) external {
         Record storage r = records[id];
         require(r.encBytes.length > 0, "No record");
         require(block.timestamp >= r.publicAt, "Too early");
