@@ -26,6 +26,7 @@ contract SecretBank is SepoliaConfig {
 
     mapping(uint256 => Record) private records;
     mapping(uint256 => uint256) private requestToId; // requestId -> recordId
+    mapping(address => uint256[]) private userRecords; // submitter -> record ids
 
     event Submitted(uint256 indexed id, address indexed submitter, uint64 publicAt);
     event MadePublic(uint256 indexed id);
@@ -78,6 +79,9 @@ contract SecretBank is SepoliaConfig {
         }
 
         emit Submitted(id, msg.sender, publicAt);
+
+        // index per submitter
+        userRecords[msg.sender].push(id);
     }
 
     /// @notice Mark ciphertexts as publicly decryptable after the time threshold.
@@ -181,5 +185,15 @@ contract SecretBank is SepoliaConfig {
         require(r.isDecrypted, "Not decrypted");
         return r.cleartext;
     }
-}
 
+    /// @notice Returns the number of records created by a user
+    function getUserRecordCount(address user) external view returns (uint256) {
+        return userRecords[user].length;
+    }
+
+    /// @notice Returns the record id at index for a user
+    function getUserRecordIdAt(address user, uint256 index) external view returns (uint256) {
+        require(index < userRecords[user].length, "Index out of bounds");
+        return userRecords[user][index];
+    }
+}
