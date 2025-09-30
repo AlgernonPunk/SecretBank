@@ -26,28 +26,29 @@ export function SecretMy() {
     if (!address) return;
     setFinding(true);
     try {
-      const logs = await client.getLogs({
+      // Read per-user records directly from contract (no events, no global scan)
+      const count = await client.readContract({
         address: CONTRACT_ADDRESS as `0x${string}`,
         abi: CONTRACT_ABI as any,
-        eventName: 'Submitted',
-        args: { submitter: address as `0x${string}` },
-        fromBlock: 0n,
-        toBlock: 'latest',
-      });
-      const ids = Array.from(new Set(logs.map(l => l.args.id as bigint)));
+        functionName: 'getUserRecordCount',
+        args: [address as `0x${string}`],
+      }) as bigint;
+
       const metas: FoundRecord[] = [];
-      for (const id of ids) {
-        try {
-          const [submitter, publicAt, isPublic, isDecrypted] = await client.readContract({
-            address: CONTRACT_ADDRESS as `0x${string}`,
-            abi: CONTRACT_ABI as any,
-            functionName: 'getRecordMeta',
-            args: [id],
-          }) as [string, bigint, boolean, boolean];
-          metas.push({ id, publicAt, isPublic, isDecrypted });
-        } catch (e) {
-          metas.push({ id });
-        }
+      for (let i = 0n; i < count; i++) {
+        const id = await client.readContract({
+          address: CONTRACT_ADDRESS as `0x${string}`,
+          abi: CONTRACT_ABI as any,
+          functionName: 'getUserRecordIdAt',
+          args: [address as `0x${string}`, i],
+        }) as bigint;
+        const [submitter, publicAt, isPublic, isDecrypted] = await client.readContract({
+          address: CONTRACT_ADDRESS as `0x${string}`,
+          abi: CONTRACT_ABI as any,
+          functionName: 'getRecordMeta',
+          args: [id],
+        }) as [string, bigint, boolean, boolean];
+        metas.push({ id, publicAt, isPublic, isDecrypted });
       }
       setRecords(metas.sort((a, b) => Number((b.publicAt ?? 0n) - (a.publicAt ?? 0n))));
     } finally {
@@ -147,4 +148,3 @@ export function SecretMy() {
     </div>
   );
 }
-
