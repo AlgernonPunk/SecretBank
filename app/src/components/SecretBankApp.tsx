@@ -19,7 +19,26 @@ export function SecretBankApp() {
       </nav>
 
       {activeTab === 'submit' ? <SecretSubmit /> : <SecretView />}
+
+      <section style={{ marginTop: 32, paddingTop: 16, borderTop: '1px solid #eee' }}>
+        <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>How To Use</h2>
+        <ol style={{ paddingLeft: 18, margin: 0, lineHeight: 1.6 }}>
+          <li>Connect a wallet on Sepolia.</li>
+          <li>Go to “Submit”. Enter your string.</li>
+          <li>Optional: set “Encryption address”. If empty, your wallet address is used to encrypt.</li>
+          <li>Optional: set “Public At” time (UTC). Default is now + 60s.</li>
+          <li>Click “Submit”. The app encrypts address + bytes and writes on-chain.</li>
+          <li>Go to “View”. Enter record id and click “Load”.</li>
+          <li>Click “Decrypt (user)” to re-encrypt through Zama Relayer and reveal the plaintext locally.</li>
+        </ol>
+        <div style={{ marginTop: 12, fontSize: 13, color: '#555' }}>
+          Owner only (after Public At): use on-chain actions to reveal data for everyone.
+          <ul style={{ paddingLeft: 18, margin: '6px 0 0' }}>
+            <li>Make-public path: call <code>makePublic(id)</code> so anyone can use public decryption.</li>
+            <li>Oracle path: call <code>requestDecryption(id)</code>; the oracle callback stores plaintext on-chain.</li>
+          </ul>
+        </div>
+      </section>
     </div>
   );
 }
-
