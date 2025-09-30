@@ -45,13 +45,13 @@ export function SecretSubmit() {
   return (
     <form onSubmit={onSubmit} style={{ display: 'grid', gap: 12 }}>
       <label>
-        <div>String</div>
+        <div>Secret</div>
         <input value={text} onChange={e => setText(e.target.value)} required placeholder="Secret text" style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
       </label>
-      <label>
+      {/* <label>
         <div>Encryption address (optional)</div>
         <input value={encAddr} onChange={e => setEncAddr(e.target.value)} placeholder="0x... (defaults to your address)" style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
-      </label>
+      </label> */}
       <label>
         <div>Public At (UTC, optional)</div>
         <input type="datetime-local" value={publicAt} onChange={e => setPublicAt(e.target.value)} style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 6 }} />
