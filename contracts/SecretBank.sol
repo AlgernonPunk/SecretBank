@@ -1,243 +1,185 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {FHE, eaddress, externalEaddress, euint32, externalEuint32} from "@fhevm/solidity/lib/FHE.sol";
+import {FHE, euint8, eaddress, externalEuint8, externalEaddress} from "@fhevm/solidity/lib/FHE.sol";
 import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 
-/// @title SecretBank - A confidential storage system for encrypted secrets
-/// @notice This contract allows users to store encrypted strings with encrypted addresses and reveal times
-/// @dev Uses Zama FHE for confidential operations
+/// @title SecretBank
+/// @notice Store encrypted bytes (string) with an encrypted address and a public timestamp.
+///         After the timestamp, the contract owner can either make the ciphertext publicly
+///         decryptable or request decryption via the oracle and persist the cleartext on-chain.
 contract SecretBank is SepoliaConfig {
-    struct Secret {
-        string encryptedString;     // The encrypted string content
-        eaddress encryptedAddress;  // The encrypted EVM address
-        uint256 revealTime;         // Timestamp when the secret can be revealed
-        address depositor;          // Address of the user who deposited the secret
-        bool isRevealed;           // Whether the secret has been revealed
-        uint256 secretId;          // Unique identifier for the secret
+    struct Record {
+        address submitter;
+        eaddress encOwner; // Zama encrypted address
+        euint8[] encBytes; // Zama encrypted bytes, one byte per euint8
+        uint64 publicAt;   // UNIX timestamp when the data can be revealed
+        bool isPublic;     // Whether ciphertexts are marked publicly decryptable
+        bool isDecrypted;  // Whether on-chain plaintext is available
+        string cleartext;  // Plaintext after oracle decryption callback
+        uint256 requestId; // Last oracle request id
+        bool decryptionPending; // True when a decryption has been requested
     }
 
-    // State variables
-    mapping(uint256 => Secret) public secrets;
-    mapping(address => uint256[]) public userSecrets;
-    uint256 public nextSecretId;
     address public owner;
+    uint256 public nextId;
 
-    // Decryption related variables
-    mapping(uint256 => bool) public decryptionRequested;
-    mapping(uint256 => uint256) private decryptionRequestIds;
-    mapping(uint256 => bool) public isDecryptionPending;
+    mapping(uint256 => Record) private records;
+    mapping(uint256 => uint256) private requestToId; // requestId -> recordId
 
-    // Events
-    event SecretDeposited(
-        uint256 indexed secretId,
-        address indexed depositor,
-        uint256 revealTime
-    );
+    event Submitted(uint256 indexed id, address indexed submitter, uint64 publicAt);
+    event MadePublic(uint256 indexed id);
+    event DecryptionRequested(uint256 indexed id, uint256 indexed requestId);
+    event Decrypted(uint256 indexed id);
 
-    event DecryptionRequested(
-        uint256 indexed secretId,
-        uint256 requestId
-    );
-
-    event SecretRevealed(
-        uint256 indexed secretId,
-        address revealedAddress
-    );
-
-    // Modifiers
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can call this function");
-        _;
-    }
-
-    modifier validSecretId(uint256 secretId) {
-        require(secretId < nextSecretId, "Invalid secret ID");
-        _;
-    }
-
-    modifier canReveal(uint256 secretId) {
-        require(block.timestamp >= secrets[secretId].revealTime, "Reveal time not reached");
-        require(!secrets[secretId].isRevealed, "Secret already revealed");
+        require(msg.sender == owner, "Not owner");
         _;
     }
 
     constructor() {
         owner = msg.sender;
-        nextSecretId = 0;
+        nextId = 1;
     }
 
-    /// @notice Deposit a new secret with encrypted string and address
-    /// @param encryptedString The encrypted string content to store
-    /// @param inputEncryptedAddress The encrypted address associated with the secret
-    /// @param revealTime The timestamp when the secret can be revealed
-    /// @param inputProof The proof for the encrypted inputs
-    function depositSecret(
-        string calldata encryptedString,
-        externalEaddress inputEncryptedAddress,
-        uint256 revealTime,
-        bytes calldata inputProof
-    ) external {
-        require(revealTime > block.timestamp, "Reveal time must be in the future");
-        require(bytes(encryptedString).length > 0, "Encrypted string cannot be empty");
+    /// @notice Submit a new secret entry
+    /// @param encAddr Zama encrypted address
+    /// @param encData Zama encrypted bytes (each item is one byte as externalEuint8)
+    /// @param inputProof Relayer input proof for both address and bytes
+    /// @param publicAt UNIX timestamp when reveal is allowed
+    /// @return id Newly created record id
+    function submitSecret(
+        externalEaddress encAddr,
+        externalEuint8[] calldata encData,
+        bytes calldata inputProof,
+        uint64 publicAt
+    ) external returns (uint256 id) {
+        require(encData.length > 0, "Empty data");
 
-        // Validate and convert the encrypted address
-        eaddress encryptedAddress = FHE.fromExternal(inputEncryptedAddress, inputProof);
+        id = nextId++;
 
-        // Create the secret
-        Secret storage newSecret = secrets[nextSecretId];
-        newSecret.encryptedString = encryptedString;
-        newSecret.encryptedAddress = encryptedAddress;
-        newSecret.revealTime = revealTime;
-        newSecret.depositor = msg.sender;
-        newSecret.isRevealed = false;
-        newSecret.secretId = nextSecretId;
+        Record storage r = records[id];
+        r.submitter = msg.sender;
+        r.publicAt = publicAt;
 
-        // Set ACL permissions
-        FHE.allowThis(encryptedAddress);
-        FHE.allow(encryptedAddress, msg.sender);
-        FHE.allow(encryptedAddress, owner);
+        // Import and store encrypted address
+        r.encOwner = FHE.fromExternal(encAddr, inputProof);
+        FHE.allowThis(r.encOwner);
+        FHE.allow(r.encOwner, msg.sender);
 
-        // Add to user's secrets list
-        userSecrets[msg.sender].push(nextSecretId);
+        // Import and store encrypted bytes
+        r.encBytes = new euint8[](encData.length);
+        for (uint256 i = 0; i < encData.length; i++) {
+            euint8 b = FHE.fromExternal(encData[i], inputProof);
+            r.encBytes[i] = b;
+            // Grant access: contract + submitter can decrypt
+            FHE.allowThis(b);
+            FHE.allow(b, msg.sender);
+        }
 
-        emit SecretDeposited(nextSecretId, msg.sender, revealTime);
-
-        nextSecretId++;
+        emit Submitted(id, msg.sender, publicAt);
     }
 
-    /// @notice Request decryption of a secret's encrypted address (only owner)
-    /// @param secretId The ID of the secret to decrypt
-    function requestDecryption(uint256 secretId)
-        external
-        onlyOwner
-        validSecretId(secretId)
-        canReveal(secretId)
-    {
-        require(!decryptionRequested[secretId], "Decryption already requested");
-        require(!isDecryptionPending[secretId], "Decryption already pending");
+    /// @notice Mark ciphertexts as publicly decryptable after the time threshold.
+    function makePublic(uint256 id) external onlyOwner {
+        Record storage r = records[id];
+        require(r.encBytes.length > 0, "No record");
+        require(block.timestamp >= r.publicAt, "Too early");
+        require(!r.isPublic, "Already public");
 
-        // Prepare ciphertext for decryption
-        bytes32[] memory cts = new bytes32[](1);
-        cts[0] = FHE.toBytes32(secrets[secretId].encryptedAddress);
-
-        // Request decryption
-        uint256 requestId = FHE.requestDecryption(cts, this.decryptionCallback.selector);
-
-        decryptionRequestIds[secretId] = requestId;
-        decryptionRequested[secretId] = true;
-        isDecryptionPending[secretId] = true;
-
-        emit DecryptionRequested(secretId, requestId);
+        // Mark address and all bytes as publicly decryptable
+        FHE.makePubliclyDecryptable(r.encOwner);
+        for (uint256 i = 0; i < r.encBytes.length; i++) {
+            FHE.makePubliclyDecryptable(r.encBytes[i]);
+        }
+        r.isPublic = true;
+        emit MadePublic(id);
     }
 
-    /// @notice Callback function for decryption results
-    /// @param requestId The decryption request ID
-    /// @param cleartexts The decrypted data
-    /// @param decryptionProof The proof of decryption
+    /// @notice Request on-chain oracle decryption after the time threshold.
+    ///         The decrypted cleartext will be saved in `cleartext`.
+    function requestDecryption(uint256 id) external onlyOwner {
+        Record storage r = records[id];
+        require(r.encBytes.length > 0, "No record");
+        require(block.timestamp >= r.publicAt, "Too early");
+        require(!r.decryptionPending, "Pending");
+        require(!r.isDecrypted, "Already decrypted");
+
+        bytes32[] memory cts = new bytes32[](r.encBytes.length);
+        for (uint256 i = 0; i < r.encBytes.length; i++) {
+            cts[i] = FHE.toBytes32(r.encBytes[i]);
+        }
+
+        uint256 reqId = FHE.requestDecryption(cts, this.decryptionCallback.selector);
+        r.decryptionPending = true;
+        r.requestId = reqId;
+        requestToId[reqId] = id;
+        emit DecryptionRequested(id, reqId);
+    }
+
+    /// @notice Oracle callback. Verifies signatures and stores the plaintext.
+    /// @dev MUST be called by the relayer; signatures are verified by FHE.checkSignatures.
     function decryptionCallback(
         uint256 requestId,
         bytes memory cleartexts,
         bytes memory decryptionProof
-    ) external returns (bool) {
-        // Find the secret associated with this request
-        uint256 secretId = type(uint256).max;
-        for (uint256 i = 0; i < nextSecretId; i++) {
-            if (decryptionRequestIds[i] == requestId) {
-                secretId = i;
-                break;
-            }
-        }
+    ) public returns (bool) {
+        uint256 id = requestToId[requestId];
+        require(id != 0, "Unknown request");
 
-        require(secretId != type(uint256).max, "Invalid request ID");
-        require(isDecryptionPending[secretId], "No pending decryption for this secret");
-
-        // Verify the decryption proof
+        // Verify KMS signatures and emit FHE.DecryptionFulfilled
         FHE.checkSignatures(requestId, cleartexts, decryptionProof);
 
-        // Decode the decrypted address
-        (address decryptedAddress) = abi.decode(cleartexts, (address));
+        Record storage r = records[id];
+        // cleartexts is a concatenation of n uint256 values (left-padded); each contains an 8-bit value
+        uint256 n = cleartexts.length / 32;
+        bytes memory out = new bytes(n);
+        for (uint256 i = 0; i < n; i++) {
+            uint256 word;
+            // Read the i-th 32-byte word from `cleartexts`
+            assembly {
+                word := mload(add(add(cleartexts, 0x20), mul(i, 0x20)))
+            }
+            out[i] = bytes1(uint8(word));
+        }
 
-        // Mark secret as revealed
-        secrets[secretId].isRevealed = true;
-        isDecryptionPending[secretId] = false;
-
-        emit SecretRevealed(secretId, decryptedAddress);
-
+        r.cleartext = string(out);
+        r.isDecrypted = true;
+        r.decryptionPending = false;
+        emit Decrypted(id);
         return true;
     }
 
-    /// @notice Get secret information (view function)
-    /// @param secretId The ID of the secret to retrieve
-    /// @return encryptedString The encrypted string content
-    /// @return encryptedAddress The encrypted address (only accessible with proper ACL)
-    /// @return revealTime The reveal timestamp
-    /// @return depositor The address of the depositor
-    /// @return isRevealed Whether the secret has been revealed
-    function getSecret(uint256 secretId)
-        external
-        view
-        validSecretId(secretId)
-        returns (
-            string memory encryptedString,
-            eaddress encryptedAddress,
-            uint256 revealTime,
-            address depositor,
-            bool isRevealed
-        )
-    {
-        Secret storage secret = secrets[secretId];
-        return (
-            secret.encryptedString,
-            secret.encryptedAddress,
-            secret.revealTime,
-            secret.depositor,
-            secret.isRevealed
-        );
+    // -------- Views (no msg.sender usage in views) --------
+
+    function getRecordMeta(uint256 id) external view returns (address submitter, uint64 publicAt, bool isPublic, bool isDecrypted) {
+        Record storage r = records[id];
+        require(r.encBytes.length > 0, "No record");
+        return (r.submitter, r.publicAt, r.isPublic, r.isDecrypted);
     }
 
-    /// @notice Get all secret IDs for a user
-    /// @param user The user address
-    /// @return Array of secret IDs belonging to the user
-    function getUserSecrets(address user) external view returns (uint256[] memory) {
-        return userSecrets[user];
+    function getEncryptedOwner(uint256 id) external view returns (eaddress) {
+        Record storage r = records[id];
+        require(r.encBytes.length > 0, "No record");
+        return r.encOwner;
     }
 
-    /// @notice Get the total number of secrets
-    /// @return The total number of secrets stored
-    function getTotalSecrets() external view returns (uint256) {
-        return nextSecretId;
+    function getLength(uint256 id) external view returns (uint256) {
+        Record storage r = records[id];
+        require(r.encBytes.length > 0, "No record");
+        return r.encBytes.length;
     }
 
-    /// @notice Check if a secret can be revealed
-    /// @param secretId The ID of the secret
-    /// @return Whether the secret can be revealed
-    function canSecretBeRevealed(uint256 secretId)
-        external
-        view
-        validSecretId(secretId)
-        returns (bool)
-    {
-        return block.timestamp >= secrets[secretId].revealTime && !secrets[secretId].isRevealed;
+    function getByte(uint256 id, uint256 index) external view returns (euint8) {
+        Record storage r = records[id];
+        require(index < r.encBytes.length, "Index out of bounds");
+        return r.encBytes[index];
     }
 
-    /// @notice Get decryption status for a secret
-    /// @param secretId The ID of the secret
-    /// @return requested Whether decryption has been requested
-    /// @return pending Whether decryption is currently pending
-    function getDecryptionStatus(uint256 secretId)
-        external
-        view
-        validSecretId(secretId)
-        returns (bool requested, bool pending)
-    {
-        return (decryptionRequested[secretId], isDecryptionPending[secretId]);
-    }
-
-    /// @notice Transfer ownership of the contract
-    /// @param newOwner The new owner address
-    function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "New owner cannot be zero address");
-        owner = newOwner;
+    function getCleartext(uint256 id) external view returns (string memory) {
+        Record storage r = records[id];
+        require(r.isDecrypted, "Not decrypted");
+        return r.cleartext;
     }
 }
+
