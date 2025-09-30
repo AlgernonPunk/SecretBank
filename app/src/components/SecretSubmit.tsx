@@ -8,7 +8,7 @@ export function SecretSubmit() {
   const { address } = useAccount();
   const { instance } = useZamaInstance();
   const [text, setText] = useState('');
-  const [encAddr, setEncAddr] = useState('');
+  // const [encAddr, setEncAddr] = useState('');
   const [publicAt, setPublicAt] = useState('');
   const [status, setStatus] = useState('');
 
@@ -21,7 +21,7 @@ export function SecretSubmit() {
     if (!contractAddress) { setStatus('Contract not configured'); return; }
 
     const user = address;
-    const useAddr = encAddr || user;
+    const useAddr =  user;
 
     // Encrypt address + bytes
     const buffer = instance.createEncryptedInput(contractAddress, user);

@@ -51,7 +51,7 @@ export function SecretMy() {
           functionName: 'getUserRecordIdAt',
           args: [address as `0x${string}`, i],
         }) as bigint;
-        const [submitter, publicAt, isPublic, isDecrypted] = await client.readContract({
+        const [_, publicAt, isPublic, isDecrypted] = await client.readContract({
           address: CONTRACT_ADDRESS as `0x${string}`,
           abi: CONTRACT_ABI as any,
           functionName: 'getRecordMeta',
